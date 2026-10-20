@@ -10,11 +10,18 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 DROP TABLE IF EXISTS users CASCADE;
 CREATE TABLE users (
     user_id       UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
-    email         VARCHAR(255)   NOT NULL UNIQUE,
+    username      VARCHAR(50)    NOT NULL,
+    email         VARCHAR(255)   NOT NULL,
     password_hash VARCHAR(255)   NOT NULL,
     role          VARCHAR(20)    NOT NULL,
-    CONSTRAINT users_role_check CHECK (role IN ('Student', 'Admin'))
+    CONSTRAINT users_username_key UNIQUE (username),
+    CONSTRAINT users_email_key    UNIQUE (email),
+    CONSTRAINT users_role_check   CHECK (role IN ('Student', 'Admin'))
 );
+
+-- Case-insensitive uniqueness for login/registration lookups.
+CREATE UNIQUE INDEX users_username_lower_idx ON users (lower(username));
+CREATE UNIQUE INDEX users_email_lower_idx    ON users (lower(email));
 
 -- ============================================================
 -- courses
