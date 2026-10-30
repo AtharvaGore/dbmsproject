@@ -12,7 +12,7 @@ export default function Highlight({ html }: { html: string }) {
         if (part === "</mark>") { marked = false; return null; }
         if (!part) return null;
         return marked
-          ? <mark key={i} className="rounded bg-yellow-200 px-0.5">{part}</mark>
+          ? <mark key={i} className="rounded-[2px] bg-[#FDECC8] px-0.5 text-[#37352F]">{part}</mark>
           : <span key={i}>{part}</span>;
       })}
     </>

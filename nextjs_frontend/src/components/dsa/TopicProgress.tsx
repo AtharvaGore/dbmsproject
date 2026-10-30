@@ -1,45 +1,56 @@
-// Per-topic progress from v_topic_progress.
+"use client";
+
+// "Topics" database (Table view only): per-topic progress from v_topic_progress.
 // Owner: Bhooshan Deshpande (Member B)
 
+import { Gauge, Hash, Table2, TriangleAlert } from "lucide-react";
+import { DatabaseHeader, Tag, Td, Th, TitleIcon, border, hoverBg, text } from "./ui";
 import type { TopicProgress as Row } from "./types";
 
 export default function TopicProgress({ rows }: { rows: Row[] }) {
-  if (rows.length === 0) return <p className="text-sm text-slate-500">Tag problems with topics to see progress.</p>;
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
-        <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
-          <tr>
-            <th className="py-2 pr-3">Topic</th>
-            <th className="py-2 pr-3">Progress</th>
-            <th className="py-2 pr-3 text-right">Problems</th>
-            <th className="py-2 pr-3 text-right">Mastered</th>
-            <th className="py-2 pr-3 text-right">To revisit</th>
-            <th className="py-2 text-right">Failed in OA</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {rows.map((r) => {
-            const pct = (n: number) => `${r.problems ? (100 * n) / r.problems : 0}%`;
-            return (
-              <tr key={r.topic_id}>
-                <td className="py-2 pr-3 font-medium text-slate-900">{r.topic}</td>
-                <td className="py-2 pr-3">
-                  <div className="flex h-2 w-40 overflow-hidden rounded bg-slate-100" title={`${r.mastered} mastered, ${r.solved} solved, ${r.revisit_needed} to revisit`}>
-                    <div className="bg-emerald-500" style={{ width: pct(r.mastered) }} />
-                    <div className="bg-sky-400" style={{ width: pct(r.solved) }} />
-                    <div className="bg-amber-400" style={{ width: pct(r.revisit_needed) }} />
-                  </div>
-                </td>
-                <td className="py-2 pr-3 text-right tabular-nums">{r.problems}</td>
-                <td className="py-2 pr-3 text-right tabular-nums">{r.mastered}</td>
-                <td className={`py-2 pr-3 text-right tabular-nums ${r.revisit_needed ? "font-semibold text-amber-700" : ""}`}>{r.revisit_needed}</td>
-                <td className="py-2 text-right tabular-nums">{r.failed_in_oa}</td>
+    <section>
+      <DatabaseHeader title="Topics" views={[{ id: "table", label: "Table", icon: Table2 }]} view="table" onView={() => undefined} />
+      {rows.length === 0 ? (
+        <p className={`px-2 py-3 text-sm ${text.tertiary}`}>Tag problems with topics to see progress here.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className={`w-full min-w-[720px] border-collapse border-b ${border}`}>
+            <thead className={`border-b ${border}`}>
+              <tr>
+                <Th icon={TitleIcon} className="w-[26%]">Topic</Th>
+                <Th icon={Gauge}>Mastery</Th>
+                <Th icon={Hash}>Problems</Th>
+                <Th icon={Hash}>Mastered</Th>
+                <Th icon={Hash}>To revisit</Th>
+                <Th icon={TriangleAlert}>Failed in OA</Th>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const mastery = r.problems ? Math.round((100 * r.mastered) / r.problems) : 0;
+                return (
+                  <tr key={r.topic_id} className={`border-b ${border} ${hoverBg}`}>
+                    <Td><Tag label={r.topic} /></Td>
+                    <Td>
+                      <div className="flex items-center gap-2">
+                        <div className="h-1 w-24 overflow-hidden rounded-full bg-[#E9E9E7]">
+                          <div className="h-full rounded-full bg-[#448361]" style={{ width: `${mastery}%` }} />
+                        </div>
+                        <span className={`text-xs tabular-nums ${text.secondary}`}>{mastery}%</span>
+                      </div>
+                    </Td>
+                    <Td className="text-right tabular-nums">{r.problems}</Td>
+                    <Td className="text-right tabular-nums">{r.mastered}</Td>
+                    <Td className={`text-right tabular-nums ${r.revisit_needed >= 3 ? "font-semibold text-[#D9730D]" : ""}`}>{r.revisit_needed}</Td>
+                    <Td className={`text-right tabular-nums ${r.failed_in_oa ? "text-[#E03E3E]" : ""}`}>{r.failed_in_oa}</Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
