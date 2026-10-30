@@ -1,0 +1,54 @@
+# Builds the whole database from db/tools/init.sql on a fresh PostgreSQL 16 +
+# pgvector and runs the SQL tests, on every push and pull request.
+# Owner: Bhooshan Deshpande (Member B)
+#
+# The pgvector container runs on GitHub's servers only; nobody needs Docker
+# locally. Until Atharva's numbered files (01_A, 03_A, 05_A, 07_A, 09_A, 10_A)
+# are merged, the build step fails at the first missing \ir include. That is
+# expected.
+name: db-check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: academiaos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d academiaos"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: academiaos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h "$PGHOST" -p "$PGPORT" && exit 0
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready" >&2
+          exit 1
+
+      - name: Build schema, seed, logic and RLS
+        run: psql -X -v ON_ERROR_STOP=1 -f db/tools/init.sql
+
+      - name: Run SQL tests
+        run: ./db/tools/run_tests.sh academiaos
