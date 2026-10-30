@@ -11,3 +11,13 @@ ENV/
 __pycache__/
 *.py[cod]
 *.egg-info/
+
+# Node / Next.js
+node_modules/
+.next/
+
+# OS
+.DS_Store
+
+# Local throwaway build + stand-ins (never committed)
+/scratch/
