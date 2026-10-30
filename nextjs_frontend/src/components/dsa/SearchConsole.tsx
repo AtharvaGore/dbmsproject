@@ -1,16 +1,23 @@
 "use client";
 
-// Keyword (full-text, GIN) vs Semantic (pgvector, HNSW) search over my problems.
+// Search block, styled like Notion's search: one input, Keyword | Semantic
+// switch, results as page links. Keyword = full-text (GIN); Semantic =
+// pgvector cosine search (HNSW).
 // Owner: Bhooshan Deshpande (Member B)
 
-import { Search } from "lucide-react";
+import { FileText, Search, Sparkles } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { apiFetch } from "@/lib/api";
 import Highlight from "./Highlight";
-import { Notice, Pill, buttonClass, errorMessage, inputClass } from "./ui";
+import { Notice, Tag, border, errorMessage, hoverBg, text } from "./ui";
 import type { FtsResult, VectorResult } from "./types";
 
 type Mode = "keyword" | "semantic";
+
+const HINTS: Record<Mode, string> = {
+  keyword: 'Search notes and titles: sliding window, "two pointers", dp -knapsack',
+  semantic: "Describe the idea: pick the fewest coins that add up to a total",
+};
 
 export default function SearchConsole({ onOpen }: { onOpen: (id: number) => void }) {
   const [mode, setMode] = useState<Mode>("keyword");
@@ -31,18 +38,15 @@ export default function SearchConsole({ onOpen }: { onOpen: (id: number) => void
         setFts(await apiFetch<FtsResult[]>(`/api/dsa/search/fts?q=${encodeURIComponent(q)}&limit=10`));
         setVector(null);
       } else {
-        const rows = await apiFetch<VectorResult[]>("/api/dsa/search/vector", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: q, limit: 8 }),
-        });
-        setVector(rows);
+        setVector(await apiFetch<VectorResult[]>("/api/dsa/search/vector", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q, limit: 8 }),
+        }));
         setFts(null);
         setSemanticDown(false);
       }
     } catch (err) {
       const msg = errorMessage(err);
-      // The API answers 503 with a "try keyword search" message when the model is unavailable.
+      // The API answers 503 "…try keyword search" when the embedding model is unavailable.
       if (m === "semantic" && /unavailable|keyword/i.test(msg)) setSemanticDown(true);
       else setError(msg);
     } finally {
@@ -55,68 +59,75 @@ export default function SearchConsole({ onOpen }: { onOpen: (id: number) => void
     void run(mode);
   };
 
-  const switchToKeyword = () => {
-    setMode("keyword");
+  const switchMode = (m: Mode) => {
+    setMode(m);
     setSemanticDown(false);
-    void run("keyword");
+    if (query.trim()) void run(m);
   };
 
+  const hasResults = fts !== null || vector !== null;
+
   return (
-    <div className="space-y-3">
-      <form onSubmit={submit} className="flex flex-wrap gap-2">
-        <div className="inline-flex overflow-hidden rounded-md border border-slate-300 text-sm">
+    <div className="overflow-hidden rounded-[6px] shadow-[0_0_0_1px_rgba(15,15,15,0.05),0_3px_6px_rgba(15,15,15,0.1)]">
+      <form onSubmit={submit} className={`flex items-center gap-2 px-3 ${hasResults ? `border-b ${border}` : ""}`}>
+        <Search size={18} className={text.tertiary} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={HINTS[mode]}
+               className="h-12 min-w-0 flex-1 bg-transparent text-base placeholder:text-[#9B9A97] focus:outline-none" />
+        {loading && <span className={`text-xs ${text.tertiary}`}>Searching…</span>}
+        <div className="flex shrink-0 rounded-[4px] bg-[#37352F0F] p-0.5 text-xs">
           {(["keyword", "semantic"] as Mode[]).map((m) => (
-            <button key={m} type="button" onClick={() => setMode(m)}
-                    className={`px-3 py-1.5 capitalize ${mode === m ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
-              {m}
+            <button key={m} type="button" onClick={() => switchMode(m)}
+                    className={`flex items-center gap-1 rounded-[3px] px-2 py-1 capitalize ${
+                      mode === m ? "bg-white font-medium text-[#37352F] shadow-sm" : text.secondary}`}>
+              {m === "semantic" && <Sparkles size={12} />} {m}
             </button>
           ))}
         </div>
-        <input className={`${inputClass} min-w-[14rem] flex-1`} value={query} onChange={(e) => setQuery(e.target.value)}
-               placeholder={mode === "keyword" ? 'e.g. sliding window, "two pointers", dp -knapsack' : "e.g. pick the fewest coins to reach a total"} />
-        <button type="submit" className={buttonClass} disabled={loading}>
-          <Search size={15} /> {loading ? "Searching…" : "Search"}
-        </button>
       </form>
 
-      {mode === "semantic" && semanticDown && (
-        <Notice tone="warn">
-          Semantic search is unavailable right now (the embedding model could not load).{" "}
-          <button className="font-medium underline" onClick={switchToKeyword}>Use keyword search instead</button>
-        </Notice>
-      )}
-      {error && <Notice tone="error">{error}</Notice>}
-
-      {fts && (
-        <ul className="divide-y divide-slate-100">
-          {fts.length === 0 && <li className="py-3 text-sm text-slate-500">No keyword matches.</li>}
-          {fts.map((r) => (
-            <li key={r.problem_id} className="cursor-pointer py-2 hover:bg-slate-50" onClick={() => onOpen(r.problem_id)}>
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-slate-900">{r.title}</span>
-                <Pill label={r.difficulty} />
-                <span className="ml-auto text-xs tabular-nums text-slate-500">rank {r.rank.toFixed(3)}</span>
-              </div>
-              {r.snippet && <p className="mt-0.5 text-sm text-slate-600"><Highlight html={r.snippet} /></p>}
-            </li>
-          ))}
-        </ul>
+      {(semanticDown || error) && (
+        <div className="p-3">
+          {semanticDown ? (
+            <Notice tone="warn">
+              Semantic search is unavailable right now because the embedding model could not load.{" "}
+              <button className="font-medium underline" onClick={() => switchMode("keyword")}>Search by keyword instead</button>
+            </Notice>
+          ) : <Notice tone="error">{error}</Notice>}
+        </div>
       )}
 
-      {vector && (
-        <ul className="divide-y divide-slate-100">
-          {vector.length === 0 && <li className="py-3 text-sm text-slate-500">No similar problems (are your embeddings Missing?).</li>}
-          {vector.map((r) => (
-            <li key={r.problem_id} className="flex cursor-pointer items-center gap-2 py-2 hover:bg-slate-50" onClick={() => onOpen(r.problem_id)}>
-              <span className="font-medium text-slate-900">{r.title}</span>
-              <Pill label={r.difficulty} />
-              <Pill label={r.status} />
-              <span className="ml-auto rounded bg-violet-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-violet-800">
-                {Math.round(r.similarity * 100)}% similar
+      {hasResults && (
+        <div className="max-h-[420px] overflow-y-auto p-1.5">
+          <div className={`px-2 pb-1 pt-1.5 text-xs font-medium ${text.secondary}`}>
+            {mode === "keyword" ? "Best matches (ts_rank_cd)" : "Closest in meaning (cosine similarity)"}
+          </div>
+          {fts?.length === 0 || vector?.length === 0 ? (
+            <p className={`px-2 py-3 text-sm ${text.tertiary}`}>No results.</p>
+          ) : null}
+          {fts?.map((r) => (
+            <button key={r.problem_id} onClick={() => onOpen(r.problem_id)}
+                    className={`flex w-full gap-2.5 rounded-[4px] px-2 py-1.5 text-left ${hoverBg}`}>
+              <FileText size={18} className={`mt-0.5 shrink-0 ${text.tertiary}`} />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  {r.title} <Tag label={r.difficulty} />
+                  <span className={`ml-auto text-xs tabular-nums ${text.tertiary}`}>{r.rank.toFixed(3)}</span>
+                </span>
+                {r.snippet && <span className={`mt-0.5 block text-xs leading-5 ${text.secondary}`}><Highlight html={r.snippet} /></span>}
               </span>
-            </li>
+            </button>
           ))}
-        </ul>
+          {vector?.map((r) => (
+            <button key={r.problem_id} onClick={() => onOpen(r.problem_id)}
+                    className={`flex w-full items-center gap-2.5 rounded-[4px] px-2 py-1.5 text-left text-sm ${hoverBg}`}>
+              <FileText size={18} className={`shrink-0 ${text.tertiary}`} />
+              <span className="font-medium">{r.title}</span>
+              <Tag label={r.difficulty} />
+              <Tag label={r.status} dot />
+              <span className="ml-auto"><Tag label={`${Math.round(r.similarity * 100)}% similar`} color="purple" /></span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

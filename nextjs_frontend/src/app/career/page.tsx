@@ -1,21 +1,22 @@
 "use client";
 
-// /career: placement funnel, pipeline board, application drawer, OA logging.
+// /career: placements as a Notion-style page: funnel, then the Applications
+// database (pipeline board / table / calendar / list) with a side peek.
 // Owner: Bhooshan Deshpande (Member B)
 
-import { Plus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import ApplicationDrawer from "@/components/career/ApplicationDrawer";
+import ApplicationsDatabase from "@/components/career/ApplicationsDatabase";
 import FunnelBanner from "@/components/career/FunnelBanner";
 import LogOAForm from "@/components/career/LogOAForm";
-import PipelineBoard from "@/components/career/PipelineBoard";
-import { Drawer, Notice, buttonClass, errorMessage } from "@/components/dsa/ui";
+import { Callout, Notice, Page, SidePeek, errorMessage } from "@/components/dsa/ui";
 import type { Application, Funnel, Stage } from "@/components/career/types";
 
 export default function CareerPage() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [funnel, setFunnel] = useState<Funnel | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
   const [logging, setLogging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,48 +32,44 @@ export default function CareerPage() {
       setError(null);
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
 
+  // Board drag-and-drop: move the card at once; the API logs history and refreshes the funnel.
   const changeStage = async (id: number, stage: Stage) => {
+    setApplications((as) => as.map((a) => (a.oa_id === id ? { ...a, stage } : a)));
     try {
       await apiFetch(`/api/career/applications/${id}/stage`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage }),
       });
-      await load();
     } catch (err) {
       setError(errorMessage(err));
     }
+    await load();
   };
 
   return (
-    <main className="mx-auto max-w-7xl space-y-6 p-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Placements</h1>
-          <p className="text-sm text-slate-500">Applications, online assessments and interviews.</p>
-        </div>
-        <button className={buttonClass} onClick={() => setLogging(true)}><Plus size={15} /> Log OA event</button>
-      </header>
-
+    <Page icon="💼" title="Placements" description="Applications, online assessments and interviews, with the funnel computed in the database.">
       {error && <Notice tone="error">{error}</Notice>}
-
       <FunnelBanner funnel={funnel} />
-
-      {applications.length === 0 && !error ? (
-        <Notice>No applications yet. Log your first OA event to start the pipeline.</Notice>
-      ) : (
-        <PipelineBoard applications={applications} onOpen={setOpenId} onStage={(id, s) => void changeStage(id, s)} />
+      {loaded && applications.length === 0 && !error && (
+        <Callout icon="👋">No applications yet. Use <b>Log OA</b> to add your first one.</Callout>
       )}
+      <ApplicationsDatabase applications={applications} onOpen={setOpenId} onNew={() => setLogging(true)}
+                            onStageChange={(id, s) => void changeStage(id, s)} />
 
       <ApplicationDrawer oaId={openId} onClose={() => setOpenId(null)} onChanged={() => void load()} />
 
-      <Drawer open={logging} title="Log OA event" onClose={() => setLogging(false)}>
-        <LogOAForm onCancel={() => setLogging(false)}
-                   onSaved={(r) => { setLogging(false); void load(); setOpenId(r.oa_id); }} />
-      </Drawer>
-    </main>
+      <SidePeek open={logging} onClose={() => setLogging(false)} header="Log OA event">
+        {logging && (
+          <LogOAForm onCancel={() => setLogging(false)}
+                     onSaved={(r) => { setLogging(false); void load(); setOpenId(r.oa_id); }} />
+        )}
+      </SidePeek>
+    </Page>
   );
 }

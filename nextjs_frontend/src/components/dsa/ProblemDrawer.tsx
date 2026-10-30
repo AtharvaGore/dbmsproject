@@ -1,15 +1,26 @@
 "use client";
 
-// Problem detail: notes, review task, OAs it appeared in, similar problems,
-// edit, status change, delete embedding, delete problem.
+// Problem side peek, edited in place like a Notion page: title and notes save
+// on blur, selects and topics save on change. Status goes through PATCH so
+// the review-task trigger fires; everything else through PUT (which
+// re-embeds when the title or notes changed).
 // Owner: Bhooshan Deshpande (Member B)
 
-import { Pencil, Sparkles, Trash2 } from "lucide-react";
+import {
+  Calendar, CircleChevronDown, CircleDot, Clock, ExternalLink, FileText, Link, List, Sparkles, Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import ProblemForm from "./ProblemForm";
-import { Chip, Drawer, Notice, Pill, errorMessage, formatDate, inputClass, secondaryButtonClass } from "./ui";
-import { STATUSES, type ProblemDetail, type ProblemStatus } from "./types";
+import TagInput from "./TagInput";
+import {
+  AutoTextarea, Divider, Notice, PropertyRow, SelectProperty, SidePeek, Tag, dangerButtonClass,
+  errorMessage, formatDate, ghostButtonClass, hoverBg, inlineInputClass, text,
+} from "./ui";
+import {
+  DIFFICULTIES, PLATFORMS, STATUSES, type Problem, type ProblemDetail, type ProblemStatus, type RefreshResult,
+} from "./types";
+
+type Editable = Partial<Pick<Problem, "title" | "platform" | "difficulty" | "problem_url" | "intuition_notes" | "topics">>;
 
 export default function ProblemDrawer({ problemId, topicNames, onClose, onChanged, onOpen }: {
   problemId: number | null;
@@ -19,13 +30,20 @@ export default function ProblemDrawer({ problemId, topicNames, onClose, onChange
   onOpen: (id: number) => void;
 }) {
   const [detail, setDetail] = useState<ProblemDetail | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState("");
+  const [notes, setNotes] = useState("");
+  const [url, setUrl] = useState("");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async (id: number) => {
     try {
-      setDetail(await apiFetch<ProblemDetail>(`/api/dsa/problems/${id}`));
+      const d = await apiFetch<ProblemDetail>(`/api/dsa/problems/${id}`);
+      setDetail(d);
+      setTitle(d.title);
+      setNotes(d.intuition_notes ?? "");
+      setUrl(d.problem_url ?? "");
       setError(null);
     } catch (err) {
       setError(errorMessage(err));
@@ -34,33 +52,47 @@ export default function ProblemDrawer({ problemId, topicNames, onClose, onChange
 
   useEffect(() => {
     setDetail(null);
-    setEditing(false);
     setNotice(null);
+    setError(null);
     if (problemId !== null) void load(problemId);
   }, [problemId, load]);
 
-  const act = async (fn: () => Promise<unknown>, message?: string) => {
+  const run = async (fn: () => Promise<unknown>, message?: string) => {
+    if (problemId === null) return;
+    setSaving(true);
     try {
-      await fn();
-      setNotice(message ?? null);
+      const result = await fn();
+      const warning = (result as { warning?: string } | undefined)?.warning;
+      setNotice(warning ?? message ?? null);
+      setError(null);
       onChanged();
-      if (problemId !== null) await load(problemId);
+      await load(problemId);
     } catch (err) {
       setError(errorMessage(err));
+      await load(problemId); // put the stored values back
+    } finally {
+      setSaving(false);
     }
   };
 
+  const save = (fields: Editable) =>
+    run(() => apiFetch<Problem>(`/api/dsa/problems/${problemId}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields),
+    }));
+
   const changeStatus = (status: ProblemStatus) =>
-    act(() => apiFetch(`/api/dsa/problems/${problemId}/status`, {
+    run(() => apiFetch(`/api/dsa/problems/${problemId}/status`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
-    }), status === "Re-visit Needed" ? "Review task scheduled by the database trigger." : undefined);
+    }), status === "Re-visit Needed" ? "A review task was scheduled by the database trigger." : undefined);
 
   const deleteEmbedding = () =>
-    act(() => apiFetch(`/api/dsa/problems/${problemId}/embedding`, { method: "DELETE" }),
-        "Embedding deleted. Saving the problem again (or Refresh embeddings) re-creates it.");
+    run(() => apiFetch(`/api/dsa/problems/${problemId}/embedding`, { method: "DELETE" }), "Embedding deleted.");
+
+  const embedNow = () =>
+    run(() => apiFetch<RefreshResult>("/api/dsa/embeddings/refresh", { method: "POST" }), "Embedding created.");
 
   const deleteProblem = async () => {
-    if (!detail || !window.confirm(`Delete "${detail.title}"? Its OA links and embedding go too.`)) return;
+    if (!detail || !window.confirm(`Delete "${detail.title}"? Its OA links and embedding are deleted too.`)) return;
     try {
       await apiFetch(`/api/dsa/problems/${detail.problem_id}`, { method: "DELETE" });
       onChanged();
@@ -70,84 +102,103 @@ export default function ProblemDrawer({ problemId, topicNames, onClose, onChange
     }
   };
 
+  const header = saving ? "Saving…" : detail ? `Created ${formatDate(detail.created_at)}` : "";
+
   return (
-    <Drawer open={problemId !== null} title={detail?.title ?? "Problem"} onClose={onClose}>
-      {error && <Notice tone="error">{error}</Notice>}
-      {notice && <Notice>{notice}</Notice>}
+    <SidePeek open={problemId !== null} onClose={onClose} header={header}>
       {!detail ? (
-        !error && <p className="text-sm text-slate-500">Loading…</p>
-      ) : editing ? (
-        <ProblemForm initial={detail} topicNames={topicNames} onCancel={() => setEditing(false)}
-                     onSaved={(p) => { setEditing(false); setNotice(p.warning ?? null); onChanged(); void load(p.problem_id); }} />
+        error ? <div className="pt-6"><Notice tone="error">{error}</Notice></div> : <p className={`pt-6 text-sm ${text.tertiary}`}>Loading…</p>
       ) : (
-        <>
-          <div className="flex flex-wrap items-center gap-2">
-            <Pill label={detail.difficulty} />
-            <span className="text-sm text-slate-500">{detail.platform}</span>
-            <Pill label={detail.embedding_state} title="Vector embedding state" />
-            <select className={`${inputClass} ml-auto w-auto`} value={detail.status} aria-label="Status"
-                    onChange={(e) => void changeStatus(e.target.value as ProblemStatus)}>
-              {STATUSES.map((s) => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-          <div className="flex flex-wrap gap-1">{detail.topics.map((t) => <Chip key={t} label={t} />)}</div>
-          {detail.intuition_notes && (
-            <p className="whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-sm text-slate-700">{detail.intuition_notes}</p>
-          )}
-          <dl className="grid grid-cols-2 gap-2 text-sm">
-            <dt className="text-slate-500">Last revised</dt><dd>{formatDate(detail.last_revised)}</dd>
-            <dt className="text-slate-500">Review task</dt>
-            <dd>{detail.review_task ? `${detail.review_task.status} · ${formatDate(detail.review_task.scheduled_date)}` : "—"}</dd>
-          </dl>
+        <div className="pt-6">
+          <AutoTextarea value={title} onChange={(e) => setTitle(e.target.value.replace(/\n/g, ""))}
+                        onBlur={() => title.trim() && title !== detail.title && void save({ title })}
+                        className="mb-4 text-[40px] font-bold leading-tight" aria-label="Title" />
 
-          <section>
-            <h3 className="mb-1 text-sm font-semibold text-slate-800">Asked in OAs</h3>
-            {detail.applications.length === 0 ? (
-              <p className="text-sm text-slate-500">Not linked to any application.</p>
-            ) : (
-              <ul className="space-y-1 text-sm">
-                {detail.applications.map((a) => (
-                  <li key={a.oa_id} className="flex items-center gap-2">
-                    <span className="font-medium">{a.company_name}</span>
-                    <span className="text-slate-500">{a.role_title}</span>
-                    <Pill label={a.stage} />
-                    <span className="ml-auto text-xs">{a.solved_during_oa ? "solved in OA" : "not solved in OA"}</span>
-                  </li>
-                ))}
-              </ul>
+          <PropertyRow icon={CircleDot} name="Status">
+            <SelectProperty label="Status" dot value={detail.status} options={STATUSES} onChange={(v) => void changeStatus(v as ProblemStatus)} />
+          </PropertyRow>
+          <PropertyRow icon={CircleChevronDown} name="Difficulty">
+            <SelectProperty label="Difficulty" value={detail.difficulty} options={DIFFICULTIES} onChange={(v) => void save({ difficulty: v as Problem["difficulty"] })} />
+          </PropertyRow>
+          <PropertyRow icon={CircleChevronDown} name="Platform">
+            <SelectProperty label="Platform" value={detail.platform} options={PLATFORMS} onChange={(v) => void save({ platform: v as Problem["platform"] })} />
+          </PropertyRow>
+          <PropertyRow icon={List} name="Topics">
+            <TagInput value={detail.topics} suggestions={topicNames} onChange={(topics) => void save({ topics })} />
+          </PropertyRow>
+          <PropertyRow icon={Link} name="URL">
+            <input type="url" className={inlineInputClass} value={url} placeholder="Empty"
+                   onChange={(e) => setUrl(e.target.value)}
+                   onBlur={() => url !== (detail.problem_url ?? "") && void save({ problem_url: url })} />
+            {detail.problem_url && (
+              <a href={detail.problem_url} target="_blank" rel="noreferrer" className={`${ghostButtonClass} shrink-0`} aria-label="Open link">
+                <ExternalLink size={14} />
+              </a>
             )}
-          </section>
+          </PropertyRow>
+          <PropertyRow icon={Calendar} name="Last revised">
+            <span className="px-1.5 text-sm">{formatDate(detail.last_revised) || <span className={text.tertiary}>Empty</span>}</span>
+          </PropertyRow>
+          <PropertyRow icon={Clock} name="Review task">
+            {detail.review_task ? (
+              <span className="flex items-center gap-2 px-1.5 text-sm">
+                <Tag label={detail.review_task.status} color={detail.review_task.status === "Done" ? "green" : "orange"} dot />
+                {formatDate(detail.review_task.scheduled_date)}
+              </span>
+            ) : <span className={`px-1.5 text-sm ${text.tertiary}`}>Empty</span>}
+          </PropertyRow>
+          <PropertyRow icon={Sparkles} name="Embedding">
+            <span className="flex items-center gap-1 px-1.5">
+              <Tag label={detail.embedding_state} />
+              {detail.embedding_state === "Missing" || detail.embedding_state === "Stale" ? (
+                <button className={ghostButtonClass} onClick={() => void embedNow()}>Embed now</button>
+              ) : (
+                <button className={ghostButtonClass} onClick={() => void deleteEmbedding()}>Delete vector</button>
+              )}
+            </span>
+          </PropertyRow>
 
-          <section>
-            <h3 className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-              <Sparkles size={14} /> Similar problems
-            </h3>
-            {detail.similar.length === 0 ? (
-              <p className="text-sm text-slate-500">No embedding yet, so no neighbours.</p>
-            ) : (
-              <ul className="divide-y divide-slate-100 text-sm">
-                {detail.similar.map((s) => (
-                  <li key={s.problem_id} className="flex cursor-pointer items-center gap-2 py-1.5 hover:bg-slate-50" onClick={() => onOpen(s.problem_id)}>
-                    <span>{s.title}</span>
-                    <Pill label={s.difficulty} />
-                    <span className="ml-auto text-xs tabular-nums text-violet-700">{Math.round(s.similarity * 100)}%</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          {error && <div className="mt-3"><Notice tone="error">{error}</Notice></div>}
+          {notice && <div className="mt-3"><Notice>{notice}</Notice></div>}
 
-          <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4">
-            <button className={secondaryButtonClass} onClick={() => setEditing(true)}><Pencil size={14} /> Edit</button>
-            <button className={secondaryButtonClass} onClick={() => void deleteEmbedding()} disabled={detail.embedding_state === "Missing"}>
-              <Sparkles size={14} /> Delete embedding
+          <Divider />
+          <AutoTextarea value={notes} onChange={(e) => setNotes(e.target.value)}
+                        onBlur={() => notes !== (detail.intuition_notes ?? "") && void save({ intuition_notes: notes })}
+                        placeholder="Write your intuition…" aria-label="Intuition notes"
+                        className="min-h-[96px] text-base leading-7" />
+
+          <h3 className="mb-1 mt-8 text-lg font-semibold">Asked in OAs</h3>
+          {detail.applications.length === 0 ? (
+            <p className={`text-sm ${text.tertiary}`}>Not linked to any application yet.</p>
+          ) : detail.applications.map((a) => (
+            <div key={a.oa_id} className={`flex items-center gap-2 rounded-[4px] px-1.5 py-1 text-sm ${hoverBg}`}>
+              <span aria-hidden>🏢</span>
+              <span className="font-medium">{a.company_name}</span>
+              <span className={text.secondary}>{a.role_title}</span>
+              <span className="ml-auto flex gap-1">
+                <Tag label={a.stage} dot />
+                <Tag label={a.solved_during_oa ? "Solved in OA" : "Not solved"} color={a.solved_during_oa ? "green" : "red"} />
+              </span>
+            </div>
+          ))}
+
+          <h3 className="mb-1 mt-8 flex items-center gap-1.5 text-lg font-semibold">Similar problems</h3>
+          {detail.similar.length === 0 ? (
+            <p className={`text-sm ${text.tertiary}`}>No embedding yet, so there are no neighbours to show.</p>
+          ) : detail.similar.map((s) => (
+            <button key={s.problem_id} onClick={() => onOpen(s.problem_id)}
+                    className={`flex w-full items-center gap-2 rounded-[4px] px-1.5 py-1 text-left text-sm ${hoverBg}`}>
+              <FileText size={15} className={text.tertiary} />
+              <span className="underline decoration-[#37352F33] underline-offset-2">{s.title}</span>
+              <Tag label={s.difficulty} />
+              <span className="ml-auto"><Tag label={`${Math.round(s.similarity * 100)}%`} color="purple" /></span>
             </button>
-            <button className={`${secondaryButtonClass} ml-auto text-rose-700`} onClick={() => void deleteProblem()}>
-              <Trash2 size={14} /> Delete problem
-            </button>
-          </div>
-        </>
+          ))}
+
+          <Divider />
+          <button className={dangerButtonClass} onClick={() => void deleteProblem()}><Trash2 size={14} /> Delete problem</button>
+        </div>
       )}
-    </Drawer>
+    </SidePeek>
   );
 }
