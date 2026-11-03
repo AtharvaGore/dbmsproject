@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - DBMS Project{% endblock %}
+{% block content %}
+    <h1>Welcome, {{ session.get('username') }}</h1>
+    <p class="subtitle">
+        Logged in as <span class="role-badge">{{ session.get('role') }}</span>
+    </p>
+
+    <p>Your dashboard will appear here.</p>
+
+    <form class="logout-form" method="post" action="{{ url_for('logout') }}">
+        <button type="submit">Log out</button>
+    </form>
+{% endblock %}

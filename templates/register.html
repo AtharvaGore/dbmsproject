@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Register - DBMS Project{% endblock %}
+{% block content %}
+    <h1>Create an account</h1>
+    <p class="subtitle">All new accounts are registered with the Student role.</p>
+
+    {% if errors %}
+        <ul class="errors">
+            {% for error in errors %}
+                <li>{{ error }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('register') }}" novalidate>
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" value="{{ form.username }}"
+               minlength="3" maxlength="50" pattern="[A-Za-z0-9_]+"
+               autocomplete="username" required>
+
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" value="{{ form.email }}"
+               maxlength="255" autocomplete="email" required>
+
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password"
+               minlength="8" autocomplete="new-password" required>
+
+        <label for="confirm_password">Confirm password</label>
+        <input type="password" id="confirm_password" name="confirm_password"
+               minlength="8" autocomplete="new-password" required>
+
+        <button type="submit">Register</button>
+    </form>
+
+    <a class="button secondary" href="{{ url_for('login') }}">Back to login</a>
+    <p class="muted">Usernames may contain letters, numbers, and underscores.</p>
+{% endblock %}
